@@ -21,22 +21,22 @@ const routes = {
 };
 
 const pageLoaders = {
-    'login': () => import('./pages/login.js').then(m => m.renderLogin()),
-    'register': () => import('./pages/register.js').then(m => m.renderRegister()),
-    'admin-dashboard': () => import('./pages/admin/dashboard.js').then(m => m.renderAdminDashboard()),
-    'admin-alumni': () => import('./pages/admin/alumni.js').then(m => m.renderAdminAlumni()),
-    'admin-events': () => import('./pages/admin/events.js').then(m => m.renderAdminEvents()),
-    'admin-announcements': () => import('./pages/admin/announcements.js').then(m => m.renderAdminAnnouncements()),
-    'admin-jobs': () => import('./pages/admin/jobs.js').then(m => m.renderAdminJobs()),
-    'alumni-dashboard': () => import('./pages/alumni/dashboard.js').then(m => m.renderAlumniDashboard()),
-    'alumni-profile': () => import('./pages/alumni/profile.js').then(m => m.renderAlumniProfile()),
-    'alumni-search': () => import('./pages/alumni/search.js').then(m => m.renderAlumniSearch()),
-    'alumni-events': () => import('./pages/alumni/events.js').then(m => m.renderAlumniEvents()),
-    'alumni-jobs': () => import('./pages/alumni/jobs.js').then(m => m.renderAlumniJobs()),
-    'student-dashboard': () => import('./pages/student/dashboard.js').then(m => m.renderStudentDashboard()),
-    'student-alumni': () => import('./pages/student/alumni.js').then(m => m.renderStudentAlumni()),
-    'student-events': () => import('./pages/student/events.js').then(m => m.renderStudentEvents()),
-    'student-jobs': () => import('./pages/student/jobs.js').then(m => m.renderStudentJobs())
+    'login': () => import('../pages/login.js').then(m => m.renderLogin()),
+    'register': () => import('../pages/register.js').then(m => m.renderRegister()),
+    'admin-dashboard': () => import('../pages/admin/dashboard.js').then(m => m.renderAdminDashboard()),
+    'admin-alumni': () => import('../pages/admin/alumni.js').then(m => m.renderAdminAlumni()),
+    'admin-events': () => import('../pages/admin/events.js').then(m => m.renderAdminEvents()),
+    'admin-announcements': () => import('../pages/admin/announcements.js').then(m => m.renderAdminAnnouncements()),
+    'admin-jobs': () => import('../pages/admin/jobs.js').then(m => m.renderAdminJobs()),
+    'alumni-dashboard': () => import('../pages/alumni/dashboard.js').then(m => m.renderAlumniDashboard()),
+    'alumni-profile': () => import('../pages/alumni/profile.js').then(m => m.renderAlumniProfile()),
+    'alumni-search': () => import('../pages/alumni/search.js').then(m => m.renderAlumniSearch()),
+    'alumni-events': () => import('../pages/alumni/events.js').then(m => m.renderAlumniEvents()),
+    'alumni-jobs': () => import('../pages/alumni/jobs.js').then(m => m.renderAlumniJobs()),
+    'student-dashboard': () => import('../pages/student/dashboard.js').then(m => m.renderStudentDashboard()),
+    'student-alumni': () => import('../pages/student/alumni.js').then(m => m.renderStudentAlumni()),
+    'student-events': () => import('../pages/student/events.js').then(m => m.renderStudentEvents()),
+    'student-jobs': () => import('../pages/student/jobs.js').then(m => m.renderStudentJobs())
 };
 
 function getRoute() {
