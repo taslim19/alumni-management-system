@@ -103,14 +103,14 @@ window.api = {
     admin: {
         getDashboard: () => Promise.resolve({
             statistics: {
-                totalAlumni: 10,
-                approvedAlumni: 8,
-                pendingAlumni: 2,
-                totalStudents: 5,
-                activeUsers: 15,
-                totalEvents: 3,
-                upcomingEvents: 2,
-                totalJobs: 5
+                totalAlumni: 0,
+                approvedAlumni: 0,
+                pendingAlumni: 0,
+                totalStudents: 0,
+                activeUsers: 0,
+                totalEvents: 0,
+                upcomingEvents: 0,
+                totalJobs: 0
             },
             recentRegistrations: []
         }),
