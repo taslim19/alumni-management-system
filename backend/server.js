@@ -1,8 +1,8 @@
 const express = require('express');
-const mongoose = require('mongoose');
 const cors = require('cors');
 const dotenv = require('dotenv');
 const path = require('path');
+const { sequelize, testConnection } = require('./config/database');
 
 // Load environment variables
 dotenv.config();
@@ -30,12 +30,18 @@ app.use(express.urlencoded({ extended: true }));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // Database connection
-mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/alumni_management', {
-  useNewUrlParser: true,
-  useUnifiedTopology: true,
-})
-.then(() => console.log('✅ MongoDB connected successfully'))
-.catch((err) => console.error('❌ MongoDB connection error:', err));
+(async () => {
+  try {
+    await testConnection();
+    // Sync database (use { alter: true } for development, { force: true } to drop tables)
+    if (process.env.NODE_ENV === 'development') {
+      await sequelize.sync({ alter: false });
+      console.log('✅ Database models synchronized');
+    }
+  } catch (error) {
+    console.error('❌ Database connection error:', error);
+  }
+})();
 
 // Routes
 app.use('/api/auth', authRoutes);

@@ -1,54 +1,61 @@
-const mongoose = require('mongoose');
+const { DataTypes } = require('sequelize');
+const { sequelize } = require('../config/database');
 
-const eventSchema = new mongoose.Schema({
-  title: {
-    type: String,
-    required: [true, 'Event title is required'],
-    trim: true
-  },
-  description: {
-    type: String,
-    required: [true, 'Event description is required'],
-    maxlength: [2000, 'Description cannot exceed 2000 characters']
-  },
-  date: {
-    type: Date,
-    required: [true, 'Event date is required']
-  },
-  location: {
-    type: String,
-    required: [true, 'Event location is required'],
-    trim: true
-  },
-  eventType: {
-    type: String,
-    enum: ['networking', 'workshop', 'seminar', 'reunion', 'other'],
-    default: 'networking'
-  },
-  organizer: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User',
-    required: true
-  },
-  registeredUsers: [{
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User'
-  }],
-  maxAttendees: {
-    type: Number,
-    default: null
-  },
-  isActive: {
-    type: Boolean,
-    default: true
-  },
-  image: {
-    type: String,
-    default: ''
-  }
+const Event = sequelize.define('Event', {
+    id: {
+        type: DataTypes.INTEGER,
+        primaryKey: true,
+        autoIncrement: true
+    },
+    title: {
+        type: DataTypes.STRING(255),
+        allowNull: false
+    },
+    description: {
+        type: DataTypes.TEXT,
+        allowNull: false
+    },
+    date: {
+        type: DataTypes.DATE,
+        allowNull: false
+    },
+    location: {
+        type: DataTypes.STRING(255),
+        allowNull: false
+    },
+    eventType: {
+        type: DataTypes.ENUM('networking', 'workshop', 'seminar', 'reunion', 'other'),
+        defaultValue: 'networking',
+        field: 'event_type'
+    },
+    organizerId: {
+        type: DataTypes.INTEGER,
+        allowNull: false,
+        field: 'organizer_id',
+        references: {
+            model: 'users',
+            key: 'id'
+        }
+    },
+    maxAttendees: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+        field: 'max_attendees'
+    },
+    isActive: {
+        type: DataTypes.BOOLEAN,
+        defaultValue: true,
+        field: 'is_active'
+    },
+    image: {
+        type: DataTypes.STRING(500),
+        defaultValue: ''
+    }
 }, {
-  timestamps: true
+    tableName: 'events',
+    timestamps: true,
+    createdAt: 'created_at',
+    updatedAt: 'updated_at'
 });
 
-module.exports = mongoose.model('Event', eventSchema);
-
+module.exports = Event;
