@@ -1,37 +1,39 @@
-const mongoose = require('mongoose');
-const User = require('../models/User');
+const { sequelize, testConnection } = require('../config/database');
+const { User } = require('../models');
 require('dotenv').config();
 
-mongoose.connect(process.env.MONGODB_URI)
-  .then(async () => {
-    console.log('✅ Connected to MongoDB');
-    
+(async () => {
+  try {
+    await testConnection();
+
     // Check if admin already exists
-    const existingAdmin = await User.findOne({ email: 'admin@example.com' });
+    const existingAdmin = await User.findOne({ where: { email: 'admin@example.com' } });
     if (existingAdmin) {
       console.log('✅ Admin user already exists!');
       console.log('📧 Email: admin@example.com');
+      await sequelize.close();
       process.exit(0);
     }
 
     // Create admin user
-    const admin = new User({
+    const admin = await User.create({
       name: 'Admin User',
       email: 'admin@example.com',
       password: 'admin123',
       role: 'admin',
       isApproved: true
     });
-    
-    await admin.save();
+
     console.log('✅ Admin user created successfully!');
     console.log('📧 Email: admin@example.com');
     console.log('🔑 Password: admin123');
     console.log('⚠️  Please change the password after first login!');
+    await sequelize.close();
     process.exit(0);
-  })
-  .catch((error) => {
+  } catch (error) {
     console.error('❌ Error:', error.message);
+    await sequelize.close();
     process.exit(1);
-  });
+  }
+})();
 
