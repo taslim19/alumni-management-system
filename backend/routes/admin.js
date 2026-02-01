@@ -1,10 +1,7 @@
 const express = require('express');
 const { body, validationResult } = require('express-validator');
-const User = require('../models/User');
-const AlumniProfile = require('../models/AlumniProfile');
-const Event = require('../models/Event');
-const JobPost = require('../models/JobPost');
-const Announcement = require('../models/Announcement');
+const { Op } = require('sequelize');
+const { User, AlumniProfile, Event, JobPost, Announcement, EventRegistration } = require('../models');
 const { authenticate, authorize } = require('../middleware/auth');
 const multer = require('multer');
 const path = require('path');
@@ -51,18 +48,20 @@ router.use(authorize('admin'));
 // @access  Private/Admin
 router.get('/dashboard', async (req, res) => {
   try {
-    const totalAlumni = await User.countDocuments({ role: 'alumni' });
-    const approvedAlumni = await User.countDocuments({ role: 'alumni', isApproved: true });
-    const pendingAlumni = await User.countDocuments({ role: 'alumni', isApproved: false });
-    const totalStudents = await User.countDocuments({ role: 'student' });
-    const activeUsers = await User.countDocuments({ isActive: true });
-    const totalEvents = await Event.countDocuments();
-    const upcomingEvents = await Event.countDocuments({ date: { $gte: new Date() } });
-    const totalJobs = await JobPost.countDocuments({ isActive: true });
-    const recentRegistrations = await User.find()
-      .sort({ createdAt: -1 })
-      .limit(5)
-      .select('name email role isApproved createdAt');
+    const { Sequelize } = require('sequelize');
+    const totalAlumni = await User.count({ where: { role: 'alumni' } });
+    const approvedAlumni = await User.count({ where: { role: 'alumni', isApproved: true } });
+    const pendingAlumni = await User.count({ where: { role: 'alumni', isApproved: false } });
+    const totalStudents = await User.count({ where: { role: 'student' } });
+    const activeUsers = await User.count({ where: { isActive: true } });
+    const totalEvents = await Event.count();
+    const upcomingEvents = await Event.count({ where: { date: { [Op.gte]: new Date() } } });
+    const totalJobs = await JobPost.count({ where: { isActive: true } });
+    const recentRegistrations = await User.findAll({
+      attributes: ['id', 'name', 'email', 'role', 'isApproved', 'createdAt'],
+      order: [['createdAt', 'DESC']],
+      limit: 5
+    });
 
     res.json({
       statistics: {
@@ -89,42 +88,59 @@ router.get('/dashboard', async (req, res) => {
 router.get('/alumni', async (req, res) => {
   try {
     const { page = 1, limit = 10, search = '', isApproved, department, graduationYear } = req.query;
-    const query = { role: 'alumni' };
+    const whereClause = { role: 'alumni' };
 
     if (search) {
-      query.$or = [
-        { name: { $regex: search, $options: 'i' } },
-        { email: { $regex: search, $options: 'i' } }
+      whereClause[Op.or] = [
+        { name: { [Op.like]: `%${search}%` } },
+        { email: { [Op.like]: `%${search}%` } }
       ];
     }
 
     if (isApproved !== undefined) {
-      query.isApproved = isApproved === 'true';
+      whereClause.isApproved = isApproved === 'true';
     }
 
-    const alumni = await User.find(query)
-      .select('-password')
-      .limit(limit * 1)
-      .skip((page - 1) * limit)
-      .sort({ createdAt: -1 });
-
-    // Get profiles for filtering
-    let alumniIds = alumni.map(a => a._id);
-    let profileQuery = { user: { $in: alumniIds } };
-
+    const profileWhere = {};
     if (department) {
-      profileQuery.department = { $regex: department, $options: 'i' };
+      profileWhere.department = { [Op.like]: `%${department}%` };
     }
     if (graduationYear) {
-      profileQuery.graduationYear = parseInt(graduationYear);
+      profileWhere.graduationYear = parseInt(graduationYear);
     }
 
-    const profiles = await AlumniProfile.find(profileQuery).populate('user', 'name email');
+    const alumni = await User.findAll({
+      where: whereClause,
+      attributes: { exclude: ['password'] },
+      limit: parseInt(limit),
+      offset: (parseInt(page) - 1) * parseInt(limit),
+      order: [['createdAt', 'DESC']],
+      include: [{
+        model: AlumniProfile,
+        where: Object.keys(profileWhere).length > 0 ? profileWhere : undefined,
+        required: false
+      }]
+    });
     
-    const total = await User.countDocuments(query);
+    const total = await User.count({ where: whereClause });
 
     res.json({
-      alumni: profiles.length > 0 ? profiles : alumni.map(a => ({ user: a })),
+      alumni: alumni.map(a => ({
+        user: {
+          id: a.id,
+          name: a.name,
+          email: a.email,
+          role: a.role,
+          isApproved: a.isApproved,
+          createdAt: a.createdAt
+        },
+        ...(a.AlumniProfile ? {
+          graduationYear: a.AlumniProfile.graduationYear,
+          department: a.AlumniProfile.department,
+          company: a.AlumniProfile.company,
+          position: a.AlumniProfile.position
+        } : {})
+      })),
       totalPages: Math.ceil(total / limit),
       currentPage: page,
       total
@@ -143,7 +159,7 @@ router.put('/alumni/:id/approve', async (req, res) => {
     const { id } = req.params;
     const { isApproved } = req.body;
 
-    const user = await User.findById(id);
+    const user = await User.findByPk(id);
     if (!user || user.role !== 'alumni') {
       return res.status(404).json({ message: 'Alumni not found' });
     }
@@ -165,14 +181,14 @@ router.delete('/alumni/:id', async (req, res) => {
   try {
     const { id } = req.params;
 
-    const user = await User.findById(id);
+    const user = await User.findByPk(id);
     if (!user) {
       return res.status(404).json({ message: 'User not found' });
     }
 
-    // Delete profile if exists
-    await AlumniProfile.findOneAndDelete({ user: id });
-    await User.findByIdAndDelete(id);
+    // Delete profile if exists (CASCADE will handle this automatically)
+    await AlumniProfile.destroy({ where: { userId: id } });
+    await User.destroy({ where: { id } });
 
     res.json({ message: 'Alumni deleted successfully' });
   } catch (error) {
@@ -189,7 +205,7 @@ router.put('/alumni/:id', async (req, res) => {
     const { id } = req.params;
     const { name, email, isActive } = req.body;
 
-    const user = await User.findById(id);
+    const user = await User.findByPk(id);
     if (!user) {
       return res.status(404).json({ message: 'User not found' });
     }
@@ -222,13 +238,18 @@ router.post('/events', [
       return res.status(400).json({ errors: errors.array() });
     }
 
-    const event = new Event({
+    const event = await Event.create({
       ...req.body,
-      organizer: req.user._id
+      organizerId: req.user.id
     });
 
-    await event.save();
-    await event.populate('organizer', 'name email');
+    await event.reload({
+      include: [{
+        model: User,
+        as: 'organizer',
+        attributes: ['id', 'name', 'email']
+      }]
+    });
 
     res.status(201).json({ message: 'Event created successfully', event });
   } catch (error) {
@@ -242,14 +263,19 @@ router.post('/events', [
 // @access  Private/Admin
 router.put('/events/:id', async (req, res) => {
   try {
-    const event = await Event.findById(req.params.id);
+    const event = await Event.findByPk(req.params.id);
     if (!event) {
       return res.status(404).json({ message: 'Event not found' });
     }
 
-    Object.assign(event, req.body);
-    await event.save();
-    await event.populate('organizer', 'name email');
+    await event.update(req.body);
+    await event.reload({
+      include: [{
+        model: User,
+        as: 'organizer',
+        attributes: ['id', 'name', 'email']
+      }]
+    });
 
     res.json({ message: 'Event updated successfully', event });
   } catch (error) {
@@ -263,11 +289,12 @@ router.put('/events/:id', async (req, res) => {
 // @access  Private/Admin
 router.delete('/events/:id', async (req, res) => {
   try {
-    const event = await Event.findByIdAndDelete(req.params.id);
+    const event = await Event.findByPk(req.params.id);
     if (!event) {
       return res.status(404).json({ message: 'Event not found' });
     }
 
+    await event.destroy();
     res.json({ message: 'Event deleted successfully' });
   } catch (error) {
     console.error('Delete event error:', error);
@@ -288,13 +315,18 @@ router.post('/announcements', [
       return res.status(400).json({ errors: errors.array() });
     }
 
-    const announcement = new Announcement({
+    const announcement = await Announcement.create({
       ...req.body,
-      postedBy: req.user._id
+      postedById: req.user.id
     });
 
-    await announcement.save();
-    await announcement.populate('postedBy', 'name email');
+    await announcement.reload({
+      include: [{
+        model: User,
+        as: 'postedBy',
+        attributes: ['id', 'name', 'email']
+      }]
+    });
 
     res.status(201).json({ message: 'Announcement created successfully', announcement });
   } catch (error) {
@@ -308,9 +340,14 @@ router.post('/announcements', [
 // @access  Private/Admin
 router.get('/jobs', async (req, res) => {
   try {
-    const jobs = await JobPost.find()
-      .populate('postedBy', 'name email')
-      .sort({ createdAt: -1 });
+    const jobs = await JobPost.findAll({
+      include: [{
+        model: User,
+        as: 'postedBy',
+        attributes: ['id', 'name', 'email']
+      }],
+      order: [['createdAt', 'DESC']]
+    });
 
     res.json({ jobs });
   } catch (error) {
@@ -324,11 +361,12 @@ router.get('/jobs', async (req, res) => {
 // @access  Private/Admin
 router.delete('/jobs/:id', async (req, res) => {
   try {
-    const job = await JobPost.findByIdAndDelete(req.params.id);
+    const job = await JobPost.findByPk(req.params.id);
     if (!job) {
       return res.status(404).json({ message: 'Job posting not found' });
     }
 
+    await job.destroy();
     res.json({ message: 'Job posting deleted successfully' });
   } catch (error) {
     console.error('Delete job error:', error);
@@ -341,18 +379,22 @@ router.delete('/jobs/:id', async (req, res) => {
 // @access  Private/Admin
 router.get('/export/csv', async (req, res) => {
   try {
-    const alumni = await User.find({ role: 'alumni' }).select('-password');
-    const profiles = await AlumniProfile.find().populate('user', 'name email');
+    const profiles = await AlumniProfile.findAll({
+      include: [{
+        model: User,
+        attributes: ['id', 'name', 'email', 'isApproved']
+      }]
+    });
 
     const csvData = profiles.map(profile => ({
-      name: profile.user.name,
-      email: profile.user.email,
+      name: profile.User.name,
+      email: profile.User.email,
       graduationYear: profile.graduationYear,
       department: profile.department,
       company: profile.company,
       position: profile.position,
-      location: `${profile.location.city}, ${profile.location.state}, ${profile.location.country}`,
-      isApproved: profile.user.isApproved
+      location: `${profile.city}, ${profile.state}, ${profile.country}`,
+      isApproved: profile.User.isApproved
     }));
 
     const csvWriter = createCsvWriter({
@@ -394,8 +436,12 @@ router.get('/export/csv', async (req, res) => {
 // @access  Private/Admin
 router.get('/export/pdf', async (req, res) => {
   try {
-    const alumni = await User.find({ role: 'alumni' }).select('-password');
-    const profiles = await AlumniProfile.find().populate('user', 'name email');
+    const profiles = await AlumniProfile.findAll({
+      include: [{
+        model: User,
+        attributes: ['id', 'name', 'email']
+      }]
+    });
 
     const doc = new PDFDocument();
     res.setHeader('Content-Type', 'application/pdf');
@@ -407,8 +453,8 @@ router.get('/export/pdf', async (req, res) => {
 
     profiles.forEach((profile, index) => {
       doc.fontSize(12)
-        .text(`${index + 1}. ${profile.user.name}`, { bold: true })
-        .text(`   Email: ${profile.user.email}`)
+        .text(`${index + 1}. ${profile.User.name}`, { bold: true })
+        .text(`   Email: ${profile.User.email}`)
         .text(`   Graduation Year: ${profile.graduationYear}`)
         .text(`   Department: ${profile.department}`)
         .text(`   Company: ${profile.company || 'N/A'}`)

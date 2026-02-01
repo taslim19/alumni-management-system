@@ -1,5 +1,6 @@
 const express = require('express');
-const Announcement = require('../models/Announcement');
+const { Op } = require('sequelize');
+const { Announcement, User } = require('../models');
 const { authenticate } = require('../middleware/auth');
 
 const router = express.Router();
@@ -9,18 +10,22 @@ const router = express.Router();
 // @access  Private
 router.get('/', authenticate, async (req, res) => {
   try {
-    const query = {
-      isActive: true,
-      $or: [
-        { targetAudience: 'all' },
-        { targetAudience: req.user.role }
-      ]
-    };
-
-    const announcements = await Announcement.find(query)
-      .populate('postedBy', 'name email')
-      .sort({ isImportant: -1, createdAt: -1 })
-      .limit(20);
+    const announcements = await Announcement.findAll({
+      where: {
+        isActive: true,
+        [Op.or]: [
+          { targetAudience: { [Op.like]: '%all%' } },
+          { targetAudience: { [Op.like]: `%${req.user.role}%` } }
+        ]
+      },
+      include: [{
+        model: User,
+        as: 'postedBy',
+        attributes: ['id', 'name', 'email']
+      }],
+      order: [['isImportant', 'DESC'], ['createdAt', 'DESC']],
+      limit: 20
+    });
 
     res.json({ announcements });
   } catch (error) {
@@ -34,8 +39,13 @@ router.get('/', authenticate, async (req, res) => {
 // @access  Private
 router.get('/:id', authenticate, async (req, res) => {
   try {
-    const announcement = await Announcement.findById(req.params.id)
-      .populate('postedBy', 'name email');
+    const announcement = await Announcement.findByPk(req.params.id, {
+      include: [{
+        model: User,
+        as: 'postedBy',
+        attributes: ['id', 'name', 'email']
+      }]
+    });
 
     if (!announcement) {
       return res.status(404).json({ message: 'Announcement not found' });

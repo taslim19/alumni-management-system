@@ -1,5 +1,5 @@
 const express = require('express');
-const Event = require('../models/Event');
+const { Event, User } = require('../models');
 const { authenticate } = require('../middleware/auth');
 
 const router = express.Router();
@@ -9,10 +9,20 @@ const router = express.Router();
 // @access  Private
 router.get('/', authenticate, async (req, res) => {
   try {
-    const events = await Event.find({ isActive: true })
-      .populate('organizer', 'name email')
-      .populate('registeredUsers', 'name email')
-      .sort({ date: 1 });
+    const events = await Event.findAll({
+      where: { isActive: true },
+      include: [{
+        model: User,
+        as: 'organizer',
+        attributes: ['id', 'name', 'email']
+      }, {
+        model: User,
+        as: 'registeredUsers',
+        attributes: ['id', 'name', 'email', 'profilePhoto'],
+        through: { attributes: [] }
+      }],
+      order: [['date', 'ASC']]
+    });
 
     res.json({ events });
   } catch (error) {
@@ -26,9 +36,18 @@ router.get('/', authenticate, async (req, res) => {
 // @access  Private
 router.get('/:id', authenticate, async (req, res) => {
   try {
-    const event = await Event.findById(req.params.id)
-      .populate('organizer', 'name email')
-      .populate('registeredUsers', 'name email profilePhoto');
+    const event = await Event.findByPk(req.params.id, {
+      include: [{
+        model: User,
+        as: 'organizer',
+        attributes: ['id', 'name', 'email']
+      }, {
+        model: User,
+        as: 'registeredUsers',
+        attributes: ['id', 'name', 'email', 'profilePhoto'],
+        through: { attributes: [] }
+      }]
+    });
 
     if (!event) {
       return res.status(404).json({ message: 'Event not found' });

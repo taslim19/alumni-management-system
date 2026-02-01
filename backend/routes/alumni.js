@@ -1,10 +1,7 @@
 const express = require('express');
 const { body, validationResult } = require('express-validator');
-const User = require('../models/User');
-const AlumniProfile = require('../models/AlumniProfile');
-const Event = require('../models/Event');
-const JobPost = require('../models/JobPost');
-const Announcement = require('../models/Announcement');
+const { Op } = require('sequelize');
+const { User, AlumniProfile, Event, JobPost, Announcement, EventRegistration } = require('../models');
 const { authenticate, requireApproval, authorize } = require('../middleware/auth');
 const multer = require('multer');
 const path = require('path');
@@ -22,7 +19,7 @@ const storage = multer.diskStorage({
     cb(null, uploadPath);
   },
   filename: (req, file, cb) => {
-    cb(null, `profile-${req.user._id}-${Date.now()}${path.extname(file.originalname)}`);
+    cb(null, `profile-${req.user.id}-${Date.now()}${path.extname(file.originalname)}`);
   }
 });
 
@@ -50,8 +47,13 @@ router.use(requireApproval);
 // @access  Private/Alumni
 router.get('/profile', async (req, res) => {
   try {
-    const profile = await AlumniProfile.findOne({ user: req.user._id })
-      .populate('user', 'name email profilePhoto');
+    const profile = await AlumniProfile.findOne({
+      where: { userId: req.user.id },
+      include: [{
+        model: User,
+        attributes: ['id', 'name', 'email', 'profilePhoto']
+      }]
+    });
 
     if (!profile) {
       return res.status(404).json({ message: 'Profile not found' });
@@ -69,20 +71,32 @@ router.get('/profile', async (req, res) => {
 // @access  Private/Alumni
 router.put('/profile', async (req, res) => {
   try {
-    let profile = await AlumniProfile.findOne({ user: req.user._id });
+    let profile = await AlumniProfile.findOne({ where: { userId: req.user.id } });
+
+    const profileData = { ...req.body };
+    if (profileData.location) {
+      profileData.city = profileData.location.city || '';
+      profileData.state = profileData.location.state || '';
+      profileData.country = profileData.location.country || '';
+      delete profileData.location;
+    }
 
     if (!profile) {
       // Create profile if it doesn't exist
-      profile = new AlumniProfile({
-        user: req.user._id,
-        ...req.body
+      profile = await AlumniProfile.create({
+        userId: req.user.id,
+        ...profileData
       });
     } else {
-      Object.assign(profile, req.body);
+      await profile.update(profileData);
     }
 
-    await profile.save();
-    await profile.populate('user', 'name email profilePhoto');
+    await profile.reload({
+      include: [{
+        model: User,
+        attributes: ['id', 'name', 'email', 'profilePhoto']
+      }]
+    });
 
     res.json({ message: 'Profile updated successfully', profile });
   } catch (error) {
@@ -100,7 +114,7 @@ router.post('/profile/photo', upload.single('photo'), async (req, res) => {
       return res.status(400).json({ message: 'No file uploaded' });
     }
 
-    const user = await User.findById(req.user._id);
+    const user = await User.findByPk(req.user.id);
     
     // Delete old photo if exists
     if (user.profilePhoto) {
@@ -126,42 +140,63 @@ router.post('/profile/photo', upload.single('photo'), async (req, res) => {
 router.get('/search', async (req, res) => {
   try {
     const { query, department, graduationYear, company, page = 1, limit = 10 } = req.query;
-    const searchQuery = {};
+    const whereClause = {};
 
     if (query) {
-      searchQuery.$or = [
-        { 'user.name': { $regex: query, $options: 'i' } },
-        { company: { $regex: query, $options: 'i' } },
-        { position: { $regex: query, $options: 'i' } }
+      whereClause[Op.or] = [
+        { '$User.name$': { [Op.like]: `%${query}%` } },
+        { company: { [Op.like]: `%${query}%` } },
+        { position: { [Op.like]: `%${query}%` } }
       ];
     }
 
     if (department) {
-      searchQuery.department = { $regex: department, $options: 'i' };
+      whereClause.department = { [Op.like]: `%${department}%` };
     }
 
     if (graduationYear) {
-      searchQuery.graduationYear = parseInt(graduationYear);
+      whereClause.graduationYear = parseInt(graduationYear);
     }
 
     if (company) {
-      searchQuery.company = { $regex: company, $options: 'i' };
+      whereClause.company = { [Op.like]: `%${company}%` };
     }
 
-    // Only show approved alumni
-    const approvedUsers = await User.find({ role: 'alumni', isApproved: true }).select('_id');
-    searchQuery.user = { $in: approvedUsers.map(u => u._id) };
+    const profiles = await AlumniProfile.findAll({
+      where: whereClause,
+      include: [{
+        model: User,
+        where: { role: 'alumni', isApproved: true },
+        attributes: ['id', 'name', 'email', 'profilePhoto']
+      }],
+      limit: parseInt(limit),
+      offset: (parseInt(page) - 1) * parseInt(limit),
+      order: [['graduationYear', 'DESC']]
+    });
 
-    const profiles = await AlumniProfile.find(searchQuery)
-      .populate('user', 'name email profilePhoto')
-      .limit(limit * 1)
-      .skip((page - 1) * limit)
-      .sort({ graduationYear: -1 });
-
-    const total = await AlumniProfile.countDocuments(searchQuery);
+    const total = await AlumniProfile.count({
+      where: whereClause,
+      include: [{
+        model: User,
+        where: { role: 'alumni', isApproved: true }
+      }]
+    });
 
     res.json({
-      profiles,
+      profiles: profiles.map(p => ({
+        _id: p.id,
+        user: p.User,
+        graduationYear: p.graduationYear,
+        department: p.department,
+        company: p.company,
+        position: p.position,
+        location: {
+          city: p.city,
+          state: p.state,
+          country: p.country
+        },
+        bio: p.bio
+      })),
       totalPages: Math.ceil(total / limit),
       currentPage: page,
       total
@@ -177,9 +212,20 @@ router.get('/search', async (req, res) => {
 // @access  Private/Alumni
 router.get('/events', async (req, res) => {
   try {
-    const events = await Event.find({ isActive: true })
-      .populate('organizer', 'name email')
-      .sort({ date: 1 });
+    const events = await Event.findAll({
+      where: { isActive: true },
+      include: [{
+        model: User,
+        as: 'organizer',
+        attributes: ['id', 'name', 'email']
+      }, {
+        model: User,
+        as: 'registeredUsers',
+        attributes: ['id', 'name', 'email', 'profilePhoto'],
+        through: { attributes: [] }
+      }],
+      order: [['date', 'ASC']]
+    });
 
     res.json({ events });
   } catch (error) {
@@ -193,12 +239,22 @@ router.get('/events', async (req, res) => {
 // @access  Private/Alumni
 router.post('/events/:id/register', async (req, res) => {
   try {
-    const event = await Event.findById(req.params.id);
+    const event = await Event.findByPk(req.params.id, {
+      include: [{
+        model: User,
+        as: 'registeredUsers',
+        attributes: ['id']
+      }]
+    });
     if (!event) {
       return res.status(404).json({ message: 'Event not found' });
     }
 
-    if (event.registeredUsers.includes(req.user._id)) {
+    // Check if already registered
+    const existing = await EventRegistration.findOne({
+      where: { eventId: event.id, userId: req.user.id }
+    });
+    if (existing) {
       return res.status(400).json({ message: 'Already registered for this event' });
     }
 
@@ -206,8 +262,18 @@ router.post('/events/:id/register', async (req, res) => {
       return res.status(400).json({ message: 'Event is full' });
     }
 
-    event.registeredUsers.push(req.user._id);
-    await event.save();
+    await EventRegistration.create({
+      eventId: event.id,
+      userId: req.user.id
+    });
+
+    await event.reload({
+      include: [{
+        model: User,
+        as: 'registeredUsers',
+        attributes: ['id', 'name', 'email', 'profilePhoto']
+      }]
+    });
 
     res.json({ message: 'Successfully registered for event', event });
   } catch (error) {
@@ -221,15 +287,22 @@ router.post('/events/:id/register', async (req, res) => {
 // @access  Private/Alumni
 router.post('/events/:id/unregister', async (req, res) => {
   try {
-    const event = await Event.findById(req.params.id);
+    const event = await Event.findByPk(req.params.id);
     if (!event) {
       return res.status(404).json({ message: 'Event not found' });
     }
 
-    event.registeredUsers = event.registeredUsers.filter(
-      id => id.toString() !== req.user._id.toString()
-    );
-    await event.save();
+    await EventRegistration.destroy({
+      where: { eventId: event.id, userId: req.user.id }
+    });
+
+    await event.reload({
+      include: [{
+        model: User,
+        as: 'registeredUsers',
+        attributes: ['id', 'name', 'email', 'profilePhoto']
+      }]
+    });
 
     res.json({ message: 'Successfully unregistered from event', event });
   } catch (error) {
@@ -254,13 +327,26 @@ router.post('/jobs', [
       return res.status(400).json({ errors: errors.array() });
     }
 
-    const job = new JobPost({
-      ...req.body,
-      postedBy: req.user._id
+    const jobData = { ...req.body };
+    if (jobData.salary) {
+      jobData.salaryMin = jobData.salary.min || null;
+      jobData.salaryMax = jobData.salary.max || null;
+      jobData.salaryCurrency = jobData.salary.currency || 'USD';
+      delete jobData.salary;
+    }
+
+    const job = await JobPost.create({
+      ...jobData,
+      postedById: req.user.id
     });
 
-    await job.save();
-    await job.populate('postedBy', 'name email');
+    await job.reload({
+      include: [{
+        model: User,
+        as: 'postedBy',
+        attributes: ['id', 'name', 'email']
+      }]
+    });
 
     res.status(201).json({ message: 'Job posted successfully', job });
   } catch (error) {
@@ -274,9 +360,15 @@ router.post('/jobs', [
 // @access  Private/Alumni
 router.get('/jobs', async (req, res) => {
   try {
-    const jobs = await JobPost.find({ isActive: true })
-      .populate('postedBy', 'name email')
-      .sort({ createdAt: -1 });
+    const jobs = await JobPost.findAll({
+      where: { isActive: true },
+      include: [{
+        model: User,
+        as: 'postedBy',
+        attributes: ['id', 'name', 'email']
+      }],
+      order: [['createdAt', 'DESC']]
+    });
 
     res.json({ jobs });
   } catch (error) {
@@ -290,16 +382,22 @@ router.get('/jobs', async (req, res) => {
 // @access  Private/Alumni
 router.get('/announcements', async (req, res) => {
   try {
-    const announcements = await Announcement.find({
-      isActive: true,
-      $or: [
-        { targetAudience: 'all' },
-        { targetAudience: 'alumni' }
-      ]
-    })
-      .populate('postedBy', 'name email')
-      .sort({ createdAt: -1 })
-      .limit(20);
+    const announcements = await Announcement.findAll({
+      where: {
+        isActive: true,
+        [Op.or]: [
+          { targetAudience: { [Op.like]: '%all%' } },
+          { targetAudience: { [Op.like]: '%alumni%' } }
+        ]
+      },
+      include: [{
+        model: User,
+        as: 'postedBy',
+        attributes: ['id', 'name', 'email']
+      }],
+      order: [['createdAt', 'DESC']],
+      limit: 20
+    });
 
     res.json({ announcements });
   } catch (error) {

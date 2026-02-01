@@ -1,5 +1,6 @@
 const express = require('express');
-const JobPost = require('../models/JobPost');
+const { Op } = require('sequelize');
+const { JobPost, User } = require('../models');
 const { authenticate } = require('../middleware/auth');
 
 const router = express.Router();
@@ -10,31 +11,37 @@ const router = express.Router();
 router.get('/', authenticate, async (req, res) => {
   try {
     const { page = 1, limit = 10, search = '', location, employmentType } = req.query;
-    const query = { isActive: true };
+    const whereClause = { isActive: true };
 
     if (search) {
-      query.$or = [
-        { title: { $regex: search, $options: 'i' } },
-        { company: { $regex: search, $options: 'i' } },
-        { description: { $regex: search, $options: 'i' } }
+      whereClause[Op.or] = [
+        { title: { [Op.like]: `%${search}%` } },
+        { company: { [Op.like]: `%${search}%` } },
+        { description: { [Op.like]: `%${search}%` } }
       ];
     }
 
     if (location) {
-      query.location = { $regex: location, $options: 'i' };
+      whereClause.location = { [Op.like]: `%${location}%` };
     }
 
     if (employmentType) {
-      query.employmentType = employmentType;
+      whereClause.employmentType = employmentType;
     }
 
-    const jobs = await JobPost.find(query)
-      .populate('postedBy', 'name email')
-      .limit(limit * 1)
-      .skip((page - 1) * limit)
-      .sort({ createdAt: -1 });
+    const jobs = await JobPost.findAll({
+      where: whereClause,
+      include: [{
+        model: User,
+        as: 'postedBy',
+        attributes: ['id', 'name', 'email']
+      }],
+      limit: parseInt(limit),
+      offset: (parseInt(page) - 1) * parseInt(limit),
+      order: [['createdAt', 'DESC']]
+    });
 
-    const total = await JobPost.countDocuments(query);
+    const total = await JobPost.count({ where: whereClause });
 
     res.json({
       jobs,
@@ -53,8 +60,13 @@ router.get('/', authenticate, async (req, res) => {
 // @access  Private
 router.get('/:id', authenticate, async (req, res) => {
   try {
-    const job = await JobPost.findById(req.params.id)
-      .populate('postedBy', 'name email');
+    const job = await JobPost.findByPk(req.params.id, {
+      include: [{
+        model: User,
+        as: 'postedBy',
+        attributes: ['id', 'name', 'email']
+      }]
+    });
 
     if (!job) {
       return res.status(404).json({ message: 'Job posting not found' });

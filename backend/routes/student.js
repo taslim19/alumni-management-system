@@ -1,9 +1,6 @@
 const express = require('express');
-const User = require('../models/User');
-const AlumniProfile = require('../models/AlumniProfile');
-const Event = require('../models/Event');
-const JobPost = require('../models/JobPost');
-const Announcement = require('../models/Announcement');
+const { Op } = require('sequelize');
+const { User, AlumniProfile, Event, JobPost, Announcement, EventRegistration } = require('../models');
 const { authenticate, authorize } = require('../middleware/auth');
 
 const router = express.Router();
@@ -18,48 +15,71 @@ router.use(authorize('student'));
 router.get('/alumni', async (req, res) => {
   try {
     const { page = 1, limit = 10, search = '', department, graduationYear } = req.query;
-    const searchQuery = {};
-
-    // Only show approved alumni
-    const approvedUsers = await User.find({ role: 'alumni', isApproved: true }).select('_id');
-    searchQuery.user = { $in: approvedUsers.map(u => u._id) };
+    const whereClause = {};
 
     if (search) {
-      searchQuery.$or = [
-        { 'user.name': { $regex: search, $options: 'i' } },
-        { company: { $regex: search, $options: 'i' } },
-        { position: { $regex: search, $options: 'i' } }
+      whereClause[Op.or] = [
+        { '$User.name$': { [Op.like]: `%${search}%` } },
+        { company: { [Op.like]: `%${search}%` } },
+        { position: { [Op.like]: `%${search}%` } }
       ];
     }
 
     if (department) {
-      searchQuery.department = { $regex: department, $options: 'i' };
+      whereClause.department = { [Op.like]: `%${department}%` };
     }
 
     if (graduationYear) {
-      searchQuery.graduationYear = parseInt(graduationYear);
+      whereClause.graduationYear = parseInt(graduationYear);
     }
 
-    const profiles = await AlumniProfile.find(searchQuery)
-      .populate('user', 'name email profilePhoto')
-      .select('-phone') // Hide phone from students
-      .limit(limit * 1)
-      .skip((page - 1) * limit)
-      .sort({ graduationYear: -1 });
+    const profiles = await AlumniProfile.findAll({
+      where: whereClause,
+      include: [{
+        model: User,
+        where: { role: 'alumni', isApproved: true },
+        attributes: ['id', 'name', 'email', 'profilePhoto']
+      }],
+      attributes: { exclude: ['phone'] },
+      limit: parseInt(limit),
+      offset: (parseInt(page) - 1) * parseInt(limit),
+      order: [['graduationYear', 'DESC']]
+    });
 
     // Filter out private information based on privacy settings
     const filteredProfiles = profiles.map(profile => {
-      const profileObj = profile.toObject();
-      if (!profile.privacySettings.showEmail) {
-        profileObj.user.email = 'Hidden';
+      const profileObj = profile.toJSON();
+      if (!profile.showEmail) {
+        profileObj.User.email = 'Hidden';
       }
-      if (!profile.privacySettings.showLocation) {
+      if (!profile.showLocation) {
         profileObj.location = {};
+      } else {
+        profileObj.location = {
+          city: profile.city,
+          state: profile.state,
+          country: profile.country
+        };
       }
-      return profileObj;
+      return {
+        _id: profileObj.id,
+        user: profileObj.User,
+        graduationYear: profileObj.graduationYear,
+        department: profileObj.department,
+        company: profileObj.company,
+        position: profileObj.position,
+        location: profileObj.location,
+        bio: profileObj.bio
+      };
     });
 
-    const total = await AlumniProfile.countDocuments(searchQuery);
+    const total = await AlumniProfile.count({
+      where: whereClause,
+      include: [{
+        model: User,
+        where: { role: 'alumni', isApproved: true }
+      }]
+    });
 
     res.json({
       profiles: filteredProfiles,
@@ -78,30 +98,40 @@ router.get('/alumni', async (req, res) => {
 // @access  Private/Student
 router.get('/alumni/:id', async (req, res) => {
   try {
-    const profile = await AlumniProfile.findById(req.params.id)
-      .populate('user', 'name email profilePhoto');
+    const profile = await AlumniProfile.findByPk(req.params.id, {
+      include: [{
+        model: User,
+        attributes: ['id', 'name', 'email', 'profilePhoto']
+      }]
+    });
 
     if (!profile) {
       return res.status(404).json({ message: 'Profile not found' });
     }
 
     // Check if user is approved
-    const user = await User.findById(profile.user._id);
+    const user = await User.findByPk(profile.userId);
     if (!user || !user.isApproved) {
       return res.status(404).json({ message: 'Profile not found' });
     }
 
-    const profileObj = profile.toObject();
+    const profileObj = profile.toJSON();
     
     // Apply privacy settings
-    if (!profile.privacySettings.showEmail) {
-      profileObj.user.email = 'Hidden';
+    if (!profile.showEmail) {
+      profileObj.User.email = 'Hidden';
     }
-    if (!profile.privacySettings.showPhone) {
+    if (!profile.showPhone) {
       profileObj.phone = 'Hidden';
     }
-    if (!profile.privacySettings.showLocation) {
+    if (!profile.showLocation) {
       profileObj.location = {};
+    } else {
+      profileObj.location = {
+        city: profile.city,
+        state: profile.state,
+        country: profile.country
+      };
     }
 
     res.json({ profile: profileObj });
@@ -116,9 +146,15 @@ router.get('/alumni/:id', async (req, res) => {
 // @access  Private/Student
 router.get('/events', async (req, res) => {
   try {
-    const events = await Event.find({ isActive: true })
-      .populate('organizer', 'name email')
-      .sort({ date: 1 });
+    const events = await Event.findAll({
+      where: { isActive: true },
+      include: [{
+        model: User,
+        as: 'organizer',
+        attributes: ['id', 'name', 'email']
+      }],
+      order: [['date', 'ASC']]
+    });
 
     res.json({ events });
   } catch (error) {
@@ -132,12 +168,21 @@ router.get('/events', async (req, res) => {
 // @access  Private/Student
 router.post('/events/:id/register', async (req, res) => {
   try {
-    const event = await Event.findById(req.params.id);
+    const event = await Event.findByPk(req.params.id, {
+      include: [{
+        model: User,
+        as: 'registeredUsers',
+        attributes: ['id']
+      }]
+    });
     if (!event) {
       return res.status(404).json({ message: 'Event not found' });
     }
 
-    if (event.registeredUsers.includes(req.user._id)) {
+    const existing = await EventRegistration.findOne({
+      where: { eventId: event.id, userId: req.user.id }
+    });
+    if (existing) {
       return res.status(400).json({ message: 'Already registered for this event' });
     }
 
@@ -145,8 +190,18 @@ router.post('/events/:id/register', async (req, res) => {
       return res.status(400).json({ message: 'Event is full' });
     }
 
-    event.registeredUsers.push(req.user._id);
-    await event.save();
+    await EventRegistration.create({
+      eventId: event.id,
+      userId: req.user.id
+    });
+
+    await event.reload({
+      include: [{
+        model: User,
+        as: 'registeredUsers',
+        attributes: ['id', 'name', 'email', 'profilePhoto']
+      }]
+    });
 
     res.json({ message: 'Successfully registered for event', event });
   } catch (error) {
@@ -160,9 +215,15 @@ router.post('/events/:id/register', async (req, res) => {
 // @access  Private/Student
 router.get('/jobs', async (req, res) => {
   try {
-    const jobs = await JobPost.find({ isActive: true })
-      .populate('postedBy', 'name email')
-      .sort({ createdAt: -1 });
+    const jobs = await JobPost.findAll({
+      where: { isActive: true },
+      include: [{
+        model: User,
+        as: 'postedBy',
+        attributes: ['id', 'name', 'email']
+      }],
+      order: [['createdAt', 'DESC']]
+    });
 
     res.json({ jobs });
   } catch (error) {
@@ -176,16 +237,22 @@ router.get('/jobs', async (req, res) => {
 // @access  Private/Student
 router.get('/announcements', async (req, res) => {
   try {
-    const announcements = await Announcement.find({
-      isActive: true,
-      $or: [
-        { targetAudience: 'all' },
-        { targetAudience: 'student' }
-      ]
-    })
-      .populate('postedBy', 'name email')
-      .sort({ createdAt: -1 })
-      .limit(20);
+    const announcements = await Announcement.findAll({
+      where: {
+        isActive: true,
+        [Op.or]: [
+          { targetAudience: { [Op.like]: '%all%' } },
+          { targetAudience: { [Op.like]: '%student%' } }
+        ]
+      },
+      include: [{
+        model: User,
+        as: 'postedBy',
+        attributes: ['id', 'name', 'email']
+      }],
+      order: [['createdAt', 'DESC']],
+      limit: 20
+    });
 
     res.json({ announcements });
   } catch (error) {
