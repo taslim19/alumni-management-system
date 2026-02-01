@@ -1,7 +1,6 @@
 const express = require('express');
 const { body, validationResult } = require('express-validator');
-const User = require('../models/User');
-const AlumniProfile = require('../models/AlumniProfile');
+const { User, AlumniProfile } = require('../models');
 const generateToken = require('../utils/generateToken');
 const { authenticate } = require('../middleware/auth');
 
@@ -25,13 +24,13 @@ router.post('/register', [
     const { name, email, password, role = 'alumni', graduationYear, department } = req.body;
 
     // Check if user already exists
-    const existingUser = await User.findOne({ email });
+    const existingUser = await User.findOne({ where: { email } });
     if (existingUser) {
       return res.status(400).json({ message: 'User with this email already exists' });
     }
 
     // Create user
-    const user = new User({
+    const user = await User.create({
       name,
       email,
       password,
@@ -39,26 +38,23 @@ router.post('/register', [
       isApproved: role === 'student' // Students are auto-approved
     });
 
-    await user.save();
-
     // Create alumni profile if role is alumni
     if (role === 'alumni' && graduationYear && department) {
-      const profile = new AlumniProfile({
-        user: user._id,
+      await AlumniProfile.create({
+        userId: user.id,
         graduationYear,
         department,
         degree: req.body.degree || ''
       });
-      await profile.save();
     }
 
-    const token = generateToken(user._id);
+    const token = generateToken(user.id);
 
     res.status(201).json({
       message: 'Registration successful. ' + (role === 'alumni' ? 'Waiting for admin approval.' : ''),
       token,
       user: {
-        id: user._id,
+        id: user.id,
         name: user.name,
         email: user.email,
         role: user.role,
@@ -86,8 +82,8 @@ router.post('/login', [
 
     const { email, password } = req.body;
 
-    // Find user
-    const user = await User.findOne({ email });
+    // Find user (include password for comparison)
+    const user = await User.findOne({ where: { email } });
     if (!user) {
       return res.status(401).json({ message: 'Invalid email or password' });
     }
@@ -107,13 +103,13 @@ router.post('/login', [
     user.lastLogin = new Date();
     await user.save();
 
-    const token = generateToken(user._id);
+    const token = generateToken(user.id);
 
     res.json({
       message: 'Login successful',
       token,
       user: {
-        id: user._id,
+        id: user.id,
         name: user.name,
         email: user.email,
         role: user.role,
@@ -132,16 +128,18 @@ router.post('/login', [
 // @access  Private
 router.get('/me', authenticate, async (req, res) => {
   try {
-    const user = await User.findById(req.user._id).select('-password');
+    const user = await User.findByPk(req.user.id, {
+      attributes: { exclude: ['password'] }
+    });
     
     let profile = null;
     if (user.role === 'alumni') {
-      profile = await AlumniProfile.findOne({ user: user._id });
+      profile = await AlumniProfile.findOne({ where: { userId: user.id } });
     }
 
     res.json({
       user: {
-        id: user._id,
+        id: user.id,
         name: user.name,
         email: user.email,
         role: user.role,
