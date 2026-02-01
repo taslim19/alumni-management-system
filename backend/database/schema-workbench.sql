@@ -1,15 +1,26 @@
 -- Alumni Management System - MySQL Database Schema
--- This schema can be run directly in MySQL Workbench
--- Make sure to select the database before running individual table creation statements
+-- Optimized for MySQL Workbench execution
+-- 
+-- Instructions:
+-- 1. Open MySQL Workbench
+-- 2. Connect to your MySQL server
+-- 3. Execute this entire script (Ctrl+Shift+Enter or click Execute)
+-- 4. Or execute section by section
 
--- Create database
-CREATE DATABASE IF NOT EXISTS alumni_management CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+-- ============================================
+-- STEP 1: Create Database
+-- ============================================
+DROP DATABASE IF EXISTS alumni_management;
+CREATE DATABASE alumni_management CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
--- Use the database
 USE alumni_management;
 
+-- ============================================
+-- STEP 2: Create Tables
+-- ============================================
+
 -- Users Table
-CREATE TABLE IF NOT EXISTS users (
+CREATE TABLE users (
     id INT AUTO_INCREMENT PRIMARY KEY,
     name VARCHAR(255) NOT NULL,
     email VARCHAR(255) NOT NULL UNIQUE,
@@ -27,7 +38,7 @@ CREATE TABLE IF NOT EXISTS users (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- Alumni Profiles Table
-CREATE TABLE IF NOT EXISTS alumni_profiles (
+CREATE TABLE alumni_profiles (
     id INT AUTO_INCREMENT PRIMARY KEY,
     user_id INT NOT NULL UNIQUE,
     graduation_year INT NOT NULL,
@@ -56,7 +67,7 @@ CREATE TABLE IF NOT EXISTS alumni_profiles (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- Events Table
-CREATE TABLE IF NOT EXISTS events (
+CREATE TABLE events (
     id INT AUTO_INCREMENT PRIMARY KEY,
     title VARCHAR(255) NOT NULL,
     description TEXT NOT NULL,
@@ -75,7 +86,7 @@ CREATE TABLE IF NOT EXISTS events (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- Event Registrations (Many-to-Many)
-CREATE TABLE IF NOT EXISTS event_registrations (
+CREATE TABLE event_registrations (
     id INT AUTO_INCREMENT PRIMARY KEY,
     event_id INT NOT NULL,
     user_id INT NOT NULL,
@@ -88,7 +99,7 @@ CREATE TABLE IF NOT EXISTS event_registrations (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- Job Posts Table
-CREATE TABLE IF NOT EXISTS job_posts (
+CREATE TABLE job_posts (
     id INT AUTO_INCREMENT PRIMARY KEY,
     title VARCHAR(255) NOT NULL,
     company VARCHAR(255) NOT NULL,
@@ -110,7 +121,7 @@ CREATE TABLE IF NOT EXISTS job_posts (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- Job Applications Table
-CREATE TABLE IF NOT EXISTS job_applications (
+CREATE TABLE job_applications (
     id INT AUTO_INCREMENT PRIMARY KEY,
     job_post_id INT NOT NULL,
     user_id INT NOT NULL,
@@ -123,7 +134,7 @@ CREATE TABLE IF NOT EXISTS job_applications (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- Announcements Table
-CREATE TABLE IF NOT EXISTS announcements (
+CREATE TABLE announcements (
     id INT AUTO_INCREMENT PRIMARY KEY,
     title VARCHAR(255) NOT NULL,
     message TEXT NOT NULL,
@@ -138,13 +149,21 @@ CREATE TABLE IF NOT EXISTS announcements (
     INDEX idx_created_at (created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- Insert default admin user (password: admin123)
--- NOTE: The password hash below is a placeholder. 
--- The actual password will be hashed by bcrypt when created via createAdmin.js script.
--- To create admin user, run: node scripts/createAdmin.js
--- Or manually insert with a proper bcrypt hash (12 rounds) for 'admin123'
--- Example bcrypt hash for 'admin123': $2a$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewY5GyYqB5Y5Y5Y5Y
+-- ============================================
+-- STEP 3: Verify Tables Created
+-- ============================================
+SELECT 'Database schema created successfully!' AS Status;
+SHOW TABLES;
+
+-- ============================================
+-- STEP 4: Create Admin User (Optional)
+-- ============================================
+-- NOTE: Run the createAdmin.js script instead for proper password hashing
+-- Or uncomment and update the password hash below with a proper bcrypt hash
 -- 
+-- To generate bcrypt hash, run in Node.js:
+-- const bcrypt = require('bcryptjs');
+-- bcrypt.hash('admin123', 12).then(hash => console.log(hash));
+--
 -- INSERT INTO users (name, email, password, role, is_approved, is_active) 
--- VALUES ('Admin User', 'admin@example.com', '$2a$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewY5GyYqB5Y5Y5Y5Y', 'admin', TRUE, TRUE)
--- ON DUPLICATE KEY UPDATE email=email;
+-- VALUES ('Admin User', 'admin@example.com', 'YOUR_BCRYPT_HASH_HERE', 'admin', TRUE, TRUE);
